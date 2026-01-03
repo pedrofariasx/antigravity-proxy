@@ -70,8 +70,9 @@ function parseError(error) {
         statusCode = 400;  // Use 400 to ensure client does not retry (429 and 529 trigger retries)
 
         // Try to extract the quota reset time from the error
-        const resetMatch = error.message.match(/quota will reset after (\d+h\d+m\d+s|\d+m\d+s|\d+s)/i);
-        const modelMatch = error.message.match(/"model":\s*"([^"]+)"/);
+        const resetMatch = error.message.match(/quota will reset after ([\dh\dm\ds]+)/i);
+        // Try to extract model from our error format "Rate limited on <model>" or JSON format
+        const modelMatch = error.message.match(/Rate limited on ([^.]+)\./) || error.message.match(/"model":\s*"([^"]+)"/);
         const model = modelMatch ? modelMatch[1] : 'the model';
 
         if (resetMatch) {
@@ -111,22 +112,107 @@ app.use((req, res, next) => {
 });
 
 /**
- * Health check endpoint
+ * Health check endpoint - Detailed status
+ * Returns status of all accounts including rate limits and model quotas
  */
 app.get('/health', async (req, res) => {
     try {
         await ensureInitialized();
+        const start = Date.now();
+        
+        // Get high-level status first
         const status = accountManager.getStatus();
+        const allAccounts = accountManager.getAllAccounts();
+        
+        // Fetch quotas for each account in parallel to get detailed model info
+        const accountDetails = await Promise.allSettled(
+            allAccounts.map(async (account) => {
+                // Check model-specific rate limits
+                const activeModelLimits = Object.entries(account.modelRateLimits || {})
+                    .filter(([_, limit]) => limit.isRateLimited && limit.resetTime > Date.now());
+                const isRateLimited = activeModelLimits.length > 0;
+                const soonestReset = activeModelLimits.length > 0
+                    ? Math.min(...activeModelLimits.map(([_, l]) => l.resetTime))
+                    : null;
+
+                const baseInfo = {
+                    email: account.email,
+                    lastUsed: account.lastUsed ? new Date(account.lastUsed).toISOString() : null,
+                    modelRateLimits: account.modelRateLimits || {},
+                    rateLimitCooldownRemaining: soonestReset ? Math.max(0, soonestReset - Date.now()) : 0
+                };
+
+                // Skip invalid accounts for quota check
+                if (account.isInvalid) {
+                    return {
+                        ...baseInfo,
+                        status: 'invalid',
+                        error: account.invalidReason,
+                        models: {}
+                    };
+                }
+
+                try {
+                    const token = await accountManager.getTokenForAccount(account);
+                    const quotas = await getModelQuotas(token);
+
+                    // Format quotas for readability
+                    const formattedQuotas = {};
+                    for (const [modelId, info] of Object.entries(quotas)) {
+                        formattedQuotas[modelId] = {
+                            remaining: info.remainingFraction !== null ? `${Math.round(info.remainingFraction * 100)}%` : 'N/A',
+                            remainingFraction: info.remainingFraction,
+                            resetTime: info.resetTime || null
+                        };
+                    }
+
+                    return {
+                        ...baseInfo,
+                        status: isRateLimited ? 'rate-limited' : 'ok',
+                        models: formattedQuotas
+                    };
+                } catch (error) {
+                    return {
+                        ...baseInfo,
+                        status: 'error',
+                        error: error.message,
+                        models: {}
+                    };
+                }
+            })
+        );
+
+        // Process results
+        const detailedAccounts = accountDetails.map((result, index) => {
+            if (result.status === 'fulfilled') {
+                return result.value;
+            } else {
+                const acc = allAccounts[index];
+                return {
+                    email: acc.email,
+                    status: 'error',
+                    error: result.reason?.message || 'Unknown error',
+                    modelRateLimits: acc.modelRateLimits || {}
+                };
+            }
+        });
 
         res.json({
             status: 'ok',
-            accounts: status.summary,
-            available: status.available,
-            rateLimited: status.rateLimited,
-            invalid: status.invalid,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            latencyMs: Date.now() - start,
+            summary: status.summary,
+            counts: {
+                total: status.total,
+                available: status.available,
+                rateLimited: status.rateLimited,
+                invalid: status.invalid
+            },
+            accounts: detailedAccounts
         });
+
     } catch (error) {
+        logger.error('[API] Health check failed:', error);
         res.status(503).json({
             status: 'error',
             error: error.message,
@@ -236,11 +322,21 @@ app.get('/account-limits', async (req, res) => {
                 let accStatus;
                 if (acc.isInvalid) {
                     accStatus = 'invalid';
-                } else if (acc.isRateLimited) {
-                    const remaining = acc.rateLimitResetTime ? acc.rateLimitResetTime - Date.now() : 0;
-                    accStatus = remaining > 0 ? `limited (${formatDuration(remaining)})` : 'rate-limited';
+                } else if (accLimit?.status === 'error') {
+                    accStatus = 'error';
                 } else {
-                    accStatus = accLimit?.status || 'ok';
+                    // Count exhausted models (0% or null remaining)
+                    const models = accLimit?.models || {};
+                    const modelCount = Object.keys(models).length;
+                    const exhaustedCount = Object.values(models).filter(
+                        q => q.remainingFraction === 0 || q.remainingFraction === null
+                    ).length;
+
+                    if (exhaustedCount === 0) {
+                        accStatus = 'ok';
+                    } else {
+                        accStatus = `(${exhaustedCount}/${modelCount}) limited`;
+                    }
                 }
 
                 // Get reset time from quota API
@@ -262,14 +358,14 @@ app.get('/account-limits', async (req, res) => {
             }
             lines.push('');
 
-            // Calculate column widths
-            const modelColWidth = Math.max(25, ...sortedModels.map(m => m.length)) + 2;
-            const accountColWidth = 22;
+            // Calculate column widths - need more space for reset time info
+            const modelColWidth = Math.max(28, ...sortedModels.map(m => m.length)) + 2;
+            const accountColWidth = 30;
 
             // Header row
             let header = 'Model'.padEnd(modelColWidth);
             for (const acc of accountLimits) {
-                const shortEmail = acc.email.split('@')[0].slice(0, 18);
+                const shortEmail = acc.email.split('@')[0].slice(0, 26);
                 header += shortEmail.padEnd(accountColWidth);
             }
             lines.push(header);
@@ -281,12 +377,22 @@ app.get('/account-limits', async (req, res) => {
                 for (const acc of accountLimits) {
                     const quota = acc.models?.[modelId];
                     let cell;
-                    if (acc.status !== 'ok') {
+                    if (acc.status !== 'ok' && acc.status !== 'rate-limited') {
                         cell = `[${acc.status}]`;
                     } else if (!quota) {
                         cell = '-';
-                    } else if (quota.remainingFraction === null) {
-                        cell = '0% (exhausted)';
+                    } else if (quota.remainingFraction === 0 || quota.remainingFraction === null) {
+                        // Show reset time for exhausted models
+                        if (quota.resetTime) {
+                            const resetMs = new Date(quota.resetTime).getTime() - Date.now();
+                            if (resetMs > 0) {
+                                cell = `0% (wait ${formatDuration(resetMs)})`;
+                            } else {
+                                cell = '0% (resetting...)';
+                            }
+                        } else {
+                            cell = '0% (exhausted)';
+                        }
                     } else {
                         const pct = Math.round(quota.remainingFraction * 100);
                         cell = `${pct}%`;
@@ -404,17 +510,17 @@ app.post('/v1/messages/count_tokens', (req, res) => {
 /**
  * Main messages endpoint - Anthropic Messages API compatible
  */
+
+
+/**
+ * Anthropic-compatible Messages API
+ * POST /v1/messages
+ */
 app.post('/v1/messages', async (req, res) => {
     try {
         // Ensure account manager is initialized
         await ensureInitialized();
 
-        // Optimistic Retry: If ALL accounts are rate-limited, reset them to force a fresh check.
-        // If we have some available accounts, we try them first.
-        if (accountManager.isAllRateLimited()) {
-            logger.warn('[Server] All accounts rate-limited. Resetting state for optimistic retry.');
-            accountManager.resetAllRateLimits();
-        }
 
         const {
             model,
@@ -429,6 +535,14 @@ app.post('/v1/messages', async (req, res) => {
             top_k,
             temperature
         } = req.body;
+
+        // Optimistic Retry: If ALL accounts are rate-limited for this model, reset them to force a fresh check.
+        // If we have some available accounts, we try them first.
+        const modelId = model || 'claude-3-5-sonnet-20241022';
+        if (accountManager.isAllRateLimited(modelId)) {
+            logger.warn(`[Server] All accounts rate-limited for ${modelId}. Resetting state for optimistic retry.`);
+            accountManager.resetAllRateLimits();
+        }
 
         // Validate required fields
         if (!messages || !Array.isArray(messages)) {

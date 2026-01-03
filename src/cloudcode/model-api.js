@@ -4,8 +4,18 @@
  * Handles model listing and quota retrieval from the Cloud Code API.
  */
 
-import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_HEADERS } from '../constants.js';
+import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_HEADERS, getModelFamily } from '../constants.js';
 import { logger } from '../utils/logger.js';
+
+/**
+ * Check if a model is supported (Claude or Gemini)
+ * @param {string} modelId - Model ID to check
+ * @returns {boolean} True if model is supported
+ */
+function isSupportedModel(modelId) {
+    const family = getModelFamily(modelId);
+    return family === 'claude' || family === 'gemini';
+}
 
 /**
  * List available models in Anthropic API format
@@ -20,7 +30,9 @@ export async function listModels(token) {
         return { object: 'list', data: [] };
     }
 
-    const modelList = Object.entries(data.models).map(([modelId, modelData]) => ({
+    const modelList = Object.entries(data.models)
+        .filter(([modelId]) => isSupportedModel(modelId))
+        .map(([modelId, modelData]) => ({
         id: modelId,
         object: 'model',
         created: Math.floor(Date.now() / 1000),
@@ -85,6 +97,9 @@ export async function getModelQuotas(token) {
 
     const quotas = {};
     for (const [modelId, modelData] of Object.entries(data.models)) {
+        // Only include Claude and Gemini models
+        if (!isSupportedModel(modelId)) continue;
+
         if (modelData.quotaInfo) {
             quotas[modelId] = {
                 remainingFraction: modelData.quotaInfo.remainingFraction ?? null,

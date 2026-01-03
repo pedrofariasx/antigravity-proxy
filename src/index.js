@@ -30,29 +30,47 @@ app.listen(PORT, () => {
     // Clear console for a clean start
     console.clear();
 
+    const border = '║';
+    // align for 2-space indent (60 chars), align4 for 4-space indent (58 chars)
+    const align = (text) => text + ' '.repeat(Math.max(0, 60 - text.length));
+    const align4 = (text) => text + ' '.repeat(Math.max(0, 58 - text.length));
+    
+    // Build Control section dynamically
+    let controlSection = '║  Control:                                                    ║\n';
+    if (!isDebug) {
+        controlSection += '║    --debug            Enable debug logging                   ║\n';
+    }
+    controlSection += '║    Ctrl+C             Stop server                            ║';
+
+    // Build status section if debug mode is active
+    let statusSection = '';
+    if (isDebug) {
+        statusSection = '║                                                              ║\n';
+        statusSection += '║  Active Modes:                                               ║\n';
+        statusSection += '║    ✓ Debug mode enabled                                      ║\n';
+    }
+
     logger.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║           Antigravity Claude Proxy Server                    ║
 ╠══════════════════════════════════════════════════════════════╣
 ║                                                              ║
-║  Server running at: http://localhost:${PORT}                 ║
-║                                                              ║
-║  Control:                                                    ║
-║    --debug            Enable debug logging                   ║
-║    Ctrl+C             Stop server                            ║
+${border}  ${align(`Server running at: http://localhost:${PORT}`)}${border}
+${statusSection}║                                                              ║
+${controlSection}
 ║                                                              ║
 ║  Endpoints:                                                  ║
-║    POST /v1/messages  - Anthropic Messages API               ║
-║    GET  /v1/models    - List available models                ║
-║    GET  /health       - Health check                         ║
-║    GET  /account-limits - Account status & quotas            ║
-║    POST /refresh-token - Force token refresh                 ║
+║    POST /v1/messages         - Anthropic Messages API        ║
+║    GET  /v1/models           - List available models         ║
+║    GET  /health              - Health check                  ║
+║    GET  /account-limits      - Account status & quotas       ║
+║    POST /refresh-token       - Force token refresh           ║
 ║                                                              ║
-║  Configuration:                                              ║
-║    Storage: ${CONFIG_DIR}                                    ║
+${border}  ${align(`Configuration:`)}${border}
+${border}    ${align4(`Storage: ${CONFIG_DIR}`)}${border}
 ║                                                              ║
 ║  Usage with Claude Code:                                     ║
-║    export ANTHROPIC_BASE_URL=http://localhost:${PORT}        ║
+${border}    ${align4(`export ANTHROPIC_BASE_URL=http://localhost:${PORT}`)}${border}
 ║    export ANTHROPIC_API_KEY=dummy                            ║
 ║    claude                                                    ║
 ║                                                              ║

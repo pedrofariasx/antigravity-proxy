@@ -13,27 +13,11 @@ import {
 } from '../constants.js';
 import { convertGoogleToAnthropic } from '../format/index.js';
 import { isRateLimitError, isAuthError } from '../errors.js';
-import { formatDuration, sleep } from '../utils/helpers.js';
+import { formatDuration, sleep, isNetworkError } from '../utils/helpers.js';
 import { logger } from '../utils/logger.js';
 import { parseResetTime } from './rate-limit-parser.js';
 import { buildCloudCodeRequest, buildHeaders } from './request-builder.js';
 import { parseThinkingSSEResponse } from './sse-parser.js';
-
-/**
- * Check if an error is a rate limit error (429 or RESOURCE_EXHAUSTED)
- * @deprecated Use isRateLimitError from errors.js instead
- */
-function is429Error(error) {
-    return isRateLimitError(error);
-}
-
-/**
- * Check if an error is an auth-invalid error (credentials need re-authentication)
- * @deprecated Use isAuthError from errors.js instead
- */
-function isAuthInvalidError(error) {
-    return isAuthError(error);
-}
 
 /**
  * Send a non-streaming request to Cloud Code with multi-account support
@@ -59,7 +43,7 @@ export async function sendMessage(anthropicRequest, accountManager) {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         // Use sticky account selection for cache continuity
-        const { account: stickyAccount, waitMs } = accountManager.pickStickyAccount();
+        const { account: stickyAccount, waitMs } = accountManager.pickStickyAccount(model);
         let account = stickyAccount;
 
         // Handle waiting for sticky account
@@ -67,19 +51,19 @@ export async function sendMessage(anthropicRequest, accountManager) {
             logger.info(`[CloudCode] Waiting ${formatDuration(waitMs)} for sticky account...`);
             await sleep(waitMs);
             accountManager.clearExpiredLimits();
-            account = accountManager.getCurrentStickyAccount();
+            account = accountManager.getCurrentStickyAccount(model);
         }
 
         // Handle all accounts rate-limited
         if (!account) {
-            if (accountManager.isAllRateLimited()) {
-                const allWaitMs = accountManager.getMinWaitTimeMs();
+            if (accountManager.isAllRateLimited(model)) {
+                const allWaitMs = accountManager.getMinWaitTimeMs(model);
                 const resetTime = new Date(Date.now() + allWaitMs).toISOString();
 
                 // If wait time is too long (> 2 minutes), throw error immediately
                 if (allWaitMs > MAX_WAIT_BEFORE_ERROR_MS) {
                     throw new Error(
-                        `RESOURCE_EXHAUSTED: Rate limited. Quota will reset after ${formatDuration(allWaitMs)}. Next available: ${resetTime}`
+                        `RESOURCE_EXHAUSTED: Rate limited on ${model}. Quota will reset after ${formatDuration(allWaitMs)}. Next available: ${resetTime}`
                     );
                 }
 
@@ -88,7 +72,7 @@ export async function sendMessage(anthropicRequest, accountManager) {
                 logger.warn(`[CloudCode] All ${accountCount} account(s) rate-limited. Waiting ${formatDuration(allWaitMs)}...`);
                 await sleep(allWaitMs);
                 accountManager.clearExpiredLimits();
-                account = accountManager.pickNext();
+                account = accountManager.pickNext(model);
             }
 
             if (!account) {
@@ -163,7 +147,7 @@ export async function sendMessage(anthropicRequest, accountManager) {
                     return convertGoogleToAnthropic(data, anthropicRequest.model);
 
                 } catch (endpointError) {
-                    if (is429Error(endpointError)) {
+                    if (isRateLimitError(endpointError)) {
                         throw endpointError; // Re-throw to trigger account switch
                     }
                     logger.warn(`[CloudCode] Error at ${endpoint}:`, endpointError.message);
@@ -176,19 +160,19 @@ export async function sendMessage(anthropicRequest, accountManager) {
                 // If all endpoints returned 429, mark account as rate-limited
                 if (lastError.is429) {
                     logger.warn(`[CloudCode] All endpoints rate-limited for ${account.email}`);
-                    accountManager.markRateLimited(account.email, lastError.resetMs);
+                    accountManager.markRateLimited(account.email, lastError.resetMs, model);
                     throw new Error(`Rate limited: ${lastError.errorText}`);
                 }
                 throw lastError;
             }
 
         } catch (error) {
-            if (is429Error(error)) {
+            if (isRateLimitError(error)) {
                 // Rate limited - already marked, continue to next account
                 logger.info(`[CloudCode] Account ${account.email} rate-limited, trying next...`);
                 continue;
             }
-            if (isAuthInvalidError(error)) {
+            if (isAuthError(error)) {
                 // Auth invalid - already marked, continue to next account
                 logger.warn(`[CloudCode] Account ${account.email} has invalid credentials, trying next...`);
                 continue;
@@ -197,8 +181,15 @@ export async function sendMessage(anthropicRequest, accountManager) {
             // UNLESS it's a 500 error, then we treat it as a "soft" failure for this account and try the next one
             if (error.message.includes('API error 5') || error.message.includes('500') || error.message.includes('503')) {
                 logger.warn(`[CloudCode] Account ${account.email} failed with 5xx error, trying next...`);
-                accountManager.pickNext(); // Force advance to next account
+                accountManager.pickNext(model); // Force advance to next account
                 continue;
+            }
+
+            if (isNetworkError(error)) {
+                 logger.warn(`[CloudCode] Network error for ${account.email}, trying next account... (${error.message})`);
+                 await sleep(1000); // Brief pause before retry
+                 accountManager.pickNext(model); // Advance to next account
+                 continue;
             }
 
             throw error;

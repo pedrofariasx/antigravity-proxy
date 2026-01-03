@@ -152,6 +152,16 @@ export function convertAnthropicToGoogle(anthropicRequest) {
             if (thinkingBudget) {
                 thinkingConfig.thinking_budget = thinkingBudget;
                 logger.debug(`[RequestConverter] Claude thinking enabled with budget: ${thinkingBudget}`);
+
+                // Validate max_tokens > thinking_budget as required by the API
+                const currentMaxTokens = googleRequest.generationConfig.maxOutputTokens;
+                if (currentMaxTokens && currentMaxTokens <= thinkingBudget) {
+                    // Bump max_tokens to allow for some response content
+                    // Default to budget + 8192 (standard output buffer)
+                    const adjustedMaxTokens = thinkingBudget + 8192;
+                    logger.warn(`[RequestConverter] max_tokens (${currentMaxTokens}) <= thinking_budget (${thinkingBudget}). Adjusting to ${adjustedMaxTokens} to satisfy API requirements`);
+                    googleRequest.generationConfig.maxOutputTokens = adjustedMaxTokens;
+                }
             } else {
                 logger.debug('[RequestConverter] Claude thinking enabled (no budget specified)');
             }

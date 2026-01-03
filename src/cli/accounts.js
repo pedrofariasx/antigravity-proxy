@@ -138,8 +138,7 @@ function saveAccounts(accounts, settings = {}) {
                 projectId: acc.projectId,
                 addedAt: acc.addedAt || new Date().toISOString(),
                 lastUsed: acc.lastUsed || null,
-                isRateLimited: acc.isRateLimited || false,
-                rateLimitResetTime: acc.rateLimitResetTime || null
+                modelRateLimits: acc.modelRateLimits || {}
             })),
             settings: {
                 cooldownDurationMs: 60000,
@@ -168,7 +167,11 @@ function displayAccounts(accounts) {
 
     console.log(`\n${accounts.length} account(s) saved:`);
     accounts.forEach((acc, i) => {
-        const status = acc.isRateLimited ? ' (rate-limited)' : '';
+        // Check for any active model-specific rate limits
+        const hasActiveLimit = Object.values(acc.modelRateLimits || {}).some(
+            limit => limit.isRateLimited && limit.resetTime > Date.now()
+        );
+        const status = hasActiveLimit ? ' (rate-limited)' : '';
         console.log(`  ${i + 1}. ${acc.email}${status}`);
     });
 }
@@ -218,8 +221,7 @@ async function addAccount(existingAccounts) {
             refreshToken: result.refreshToken,
             projectId: result.projectId,
             addedAt: new Date().toISOString(),
-            isRateLimited: false,
-            rateLimitResetTime: null
+            modelRateLimits: {}
         };
     } catch (error) {
         console.error(`\n✗ Authentication failed: ${error.message}`);
@@ -280,7 +282,7 @@ async function interactiveAdd(rl) {
     if (accounts.length > 0) {
         displayAccounts(accounts);
 
-        const choice = await rl.question('\n(a)dd new, (r)emove existing, or (f)resh start? [a/r/f]: ');
+        const choice = await rl.question('\n(a)dd new, (r)emove existing, (f)resh start, or (e)xit? [a/r/f/e]: ');
         const c = choice.toLowerCase();
 
         if (c === 'r') {
@@ -291,36 +293,32 @@ async function interactiveAdd(rl) {
             accounts.length = 0;
         } else if (c === 'a') {
             console.log('\nAdding to existing accounts.');
+        } else if (c === 'e') {
+            console.log('\nExiting...');
+            return; // Exit cleanly
         } else {
             console.log('\nInvalid choice, defaulting to add.');
         }
     }
 
-    // Add accounts loop
-    while (accounts.length < MAX_ACCOUNTS) {
-        const newAccount = await addAccount(accounts);
-        if (newAccount) {
-            accounts.push(newAccount);
-            // Auto-save after each successful add to prevent data loss
-            saveAccounts(accounts);
-        } else if (accounts.length > 0) {
-            // Even if newAccount is null (duplicate update), save the updated accounts
-            saveAccounts(accounts);
-        }
+    // Add single account
+    if (accounts.length >= MAX_ACCOUNTS) {
+        console.log(`\nMaximum of ${MAX_ACCOUNTS} accounts reached.`);
+        return;
+    }
 
-        if (accounts.length >= MAX_ACCOUNTS) {
-            console.log(`\nMaximum of ${MAX_ACCOUNTS} accounts reached.`);
-            break;
-        }
-
-        const addMore = await rl.question('\nAdd another account? [y/N]: ');
-        if (addMore.toLowerCase() !== 'y') {
-            break;
-        }
+    const newAccount = await addAccount(accounts);
+    if (newAccount) {
+        accounts.push(newAccount);
+        saveAccounts(accounts);
+    } else if (accounts.length > 0) {
+        // Even if newAccount is null (duplicate update), save the updated accounts
+        saveAccounts(accounts);
     }
 
     if (accounts.length > 0) {
         displayAccounts(accounts);
+        console.log('\nTo add more accounts, run this command again.');
     } else {
         console.log('\nNo accounts to save.');
     }
@@ -431,6 +429,8 @@ async function main() {
         }
     } finally {
         rl.close();
+        // Force exit to prevent hanging
+        process.exit(0);
     }
 }
 

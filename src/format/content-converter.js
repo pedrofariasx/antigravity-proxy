@@ -37,6 +37,8 @@ export function convertContentToParts(content, isClaudeModel = false, isGeminiMo
     const parts = [];
 
     for (const block of content) {
+        if (!block) continue;
+
         if (block.type === 'text') {
             // Skip empty text blocks - they cause API errors
             if (block.text && block.text.trim()) {

@@ -81,18 +81,20 @@ export class AccountManager {
 
     /**
      * Check if all accounts are rate-limited
+     * @param {string} [modelId] - Optional model ID
      * @returns {boolean} True if all accounts are rate-limited
      */
-    isAllRateLimited() {
-        return checkAllRateLimited(this.#accounts);
+    isAllRateLimited(modelId = null) {
+        return checkAllRateLimited(this.#accounts, modelId);
     }
 
     /**
      * Get list of available (non-rate-limited, non-invalid) accounts
+     * @param {string} [modelId] - Optional model ID
      * @returns {Array<Object>} Array of available account objects
      */
-    getAvailableAccounts() {
-        return getAvailable(this.#accounts);
+    getAvailableAccounts(modelId = null) {
+        return getAvailable(this.#accounts, modelId);
     }
 
     /**
@@ -127,10 +129,11 @@ export class AccountManager {
     /**
      * Pick the next available account (fallback when current is unavailable).
      * Sets activeIndex to the selected account's index.
+     * @param {string} [modelId] - Optional model ID
      * @returns {Object|null} The next available account or null if none available
      */
-    pickNext() {
-        const { account, newIndex } = selectNext(this.#accounts, this.#currentIndex, () => this.saveToDisk());
+    pickNext(modelId = null) {
+        const { account, newIndex } = selectNext(this.#accounts, this.#currentIndex, () => this.saveToDisk(), modelId);
         this.#currentIndex = newIndex;
         return account;
     }
@@ -138,10 +141,11 @@ export class AccountManager {
     /**
      * Get the current account without advancing the index (sticky selection).
      * Used for cache continuity - sticks to the same account until rate-limited.
+     * @param {string} [modelId] - Optional model ID
      * @returns {Object|null} The current account or null if unavailable/rate-limited
      */
-    getCurrentStickyAccount() {
-        const { account, newIndex } = getSticky(this.#accounts, this.#currentIndex, () => this.saveToDisk());
+    getCurrentStickyAccount(modelId = null) {
+        const { account, newIndex } = getSticky(this.#accounts, this.#currentIndex, () => this.saveToDisk(), modelId);
         this.#currentIndex = newIndex;
         return account;
     }
@@ -149,10 +153,11 @@ export class AccountManager {
     /**
      * Check if we should wait for the current account's rate limit to reset.
      * Used for sticky account selection - wait if rate limit is short (≤ threshold).
+     * @param {string} [modelId] - Optional model ID
      * @returns {{shouldWait: boolean, waitMs: number, account: Object|null}}
      */
-    shouldWaitForCurrentAccount() {
-        return shouldWait(this.#accounts, this.#currentIndex);
+    shouldWaitForCurrentAccount(modelId = null) {
+        return shouldWait(this.#accounts, this.#currentIndex, modelId);
     }
 
     /**
@@ -160,10 +165,11 @@ export class AccountManager {
      * Prefers the current account for cache continuity, only switches when:
      * - Current account is rate-limited for > 2 minutes
      * - Current account is invalid
+     * @param {string} [modelId] - Optional model ID
      * @returns {{account: Object|null, waitMs: number}} Account to use and optional wait time
      */
-    pickStickyAccount() {
-        const { account, waitMs, newIndex } = selectSticky(this.#accounts, this.#currentIndex, () => this.saveToDisk());
+    pickStickyAccount(modelId = null) {
+        const { account, waitMs, newIndex } = selectSticky(this.#accounts, this.#currentIndex, () => this.saveToDisk(), modelId);
         this.#currentIndex = newIndex;
         return { account, waitMs };
     }
@@ -172,9 +178,10 @@ export class AccountManager {
      * Mark an account as rate-limited
      * @param {string} email - Email of the account to mark
      * @param {number|null} resetMs - Time in ms until rate limit resets (optional)
+     * @param {string} [modelId] - Optional model ID to mark specific limit
      */
-    markRateLimited(email, resetMs = null) {
-        markLimited(this.#accounts, email, resetMs, this.#settings);
+    markRateLimited(email, resetMs = null, modelId = null) {
+        markLimited(this.#accounts, email, resetMs, this.#settings, modelId);
         this.saveToDisk();
     }
 
@@ -190,10 +197,11 @@ export class AccountManager {
 
     /**
      * Get the minimum wait time until any account becomes available
+     * @param {string} [modelId] - Optional model ID
      * @returns {number} Wait time in milliseconds
      */
-    getMinWaitTimeMs() {
-        return getMinWait(this.#accounts);
+    getMinWaitTimeMs(modelId = null) {
+        return getMinWait(this.#accounts, modelId);
     }
 
     /**
@@ -251,8 +259,15 @@ export class AccountManager {
      */
     getStatus() {
         const available = this.getAvailableAccounts();
-        const rateLimited = this.#accounts.filter(a => a.isRateLimited);
         const invalid = this.getInvalidAccounts();
+
+        // Count accounts that have any active model-specific rate limits
+        const rateLimited = this.#accounts.filter(a => {
+            if (!a.modelRateLimits) return false;
+            return Object.values(a.modelRateLimits).some(
+                limit => limit.isRateLimited && limit.resetTime > Date.now()
+            );
+        });
 
         return {
             total: this.#accounts.length,
@@ -263,8 +278,7 @@ export class AccountManager {
             accounts: this.#accounts.map(a => ({
                 email: a.email,
                 source: a.source,
-                isRateLimited: a.isRateLimited,
-                rateLimitResetTime: a.rateLimitResetTime,
+                modelRateLimits: a.modelRateLimits || {},
                 isInvalid: a.isInvalid || false,
                 invalidReason: a.invalidReason || null,
                 lastUsed: a.lastUsed

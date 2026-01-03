@@ -14,6 +14,7 @@ import {
 import { refreshAccessToken } from '../auth/oauth.js';
 import { getAuthStatus } from '../auth/database.js';
 import { logger } from '../utils/logger.js';
+import { isNetworkError } from '../utils/helpers.js';
 
 /**
  * Get OAuth token for an account
@@ -48,6 +49,13 @@ export async function getTokenForAccount(account, tokenCache, onInvalid, onSave)
             }
             logger.success(`[AccountManager] Refreshed OAuth token for: ${account.email}`);
         } catch (error) {
+            // Check if it's a transient network error
+            if (isNetworkError(error)) {
+                logger.warn(`[AccountManager] Failed to refresh token for ${account.email} due to network error: ${error.message}`);
+                // Do NOT mark as invalid, just throw so caller knows it failed
+                throw new Error(`AUTH_NETWORK_ERROR: ${error.message}`);
+            }
+
             logger.error(`[AccountManager] Failed to refresh token for ${account.email}:`, error.message);
             // Mark account as invalid (credentials need re-auth)
             if (onInvalid) onInvalid(account.email, error.message);
