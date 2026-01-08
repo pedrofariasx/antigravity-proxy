@@ -1,6 +1,7 @@
-<div x-data="logsViewer" class="h-full flex flex-col glass-panel rounded-xl overflow-hidden border-space-border">
-    <!-- Toolbar -->
-    <div class="bg-space-900 flex flex-wrap gap-y-2 justify-between items-center p-2 px-4 border-b border-space-border select-none min-h-[48px]">
+<div x-data="logsViewer" class="view-container h-full flex flex-col">
+    <div class="glass-panel rounded-xl overflow-hidden border-space-border flex flex-col flex-1 min-h-0">
+        <!-- Toolbar -->
+        <div class="bg-space-900 flex flex-wrap gap-y-2 justify-between items-center p-2 px-4 border-b border-space-border select-none min-h-[48px] shrink-0">
 
         <!-- Left: Decor & Title -->
         <div class="flex items-center gap-3 shrink-0">
@@ -21,23 +22,23 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                 </div>
-                <input type="text" x-model="searchQuery" placeholder="grep logs..."
+                <input type="text" x-model="searchQuery" :placeholder="$store.global.t('grepLogs')"
                     class="w-full h-7 bg-space-950 border border-space-border rounded text-xs font-mono pl-7 pr-2 focus:border-neon-purple focus:outline-none transition-colors placeholder-gray-700 text-gray-300">
             </div>
 
             <!-- Filters -->
             <div class="hidden md:flex gap-3 text-[10px] font-mono font-bold uppercase select-none">
                  <label class="flex items-center gap-1.5 cursor-pointer text-blue-400 opacity-50 hover:opacity-100 transition-opacity" :class="{'opacity-100': filters.INFO}">
-                     <input type="checkbox" class="checkbox checkbox-xs checkbox-info rounded-[2px] w-3 h-3 border-blue-400/50" x-model="filters.INFO"> INFO
+                     <input type="checkbox" class="checkbox checkbox-xs checkbox-info rounded-[2px] w-3 h-3 border-blue-400/50" x-model="filters.INFO"> <span x-text="$store.global.t('logLevelInfo')">INFO</span>
                  </label>
                  <label class="flex items-center gap-1.5 cursor-pointer text-neon-green opacity-50 hover:opacity-100 transition-opacity" :class="{'opacity-100': filters.SUCCESS}">
-                     <input type="checkbox" class="checkbox checkbox-xs checkbox-success rounded-[2px] w-3 h-3 border-neon-green/50" x-model="filters.SUCCESS"> SUCCESS
+                     <input type="checkbox" class="checkbox checkbox-xs checkbox-success rounded-[2px] w-3 h-3 border-neon-green/50" x-model="filters.SUCCESS"> <span x-text="$store.global.t('logLevelSuccess')">SUCCESS</span>
                  </label>
                  <label class="flex items-center gap-1.5 cursor-pointer text-yellow-400 opacity-50 hover:opacity-100 transition-opacity" :class="{'opacity-100': filters.WARN}">
-                     <input type="checkbox" class="checkbox checkbox-xs checkbox-warning rounded-[2px] w-3 h-3 border-yellow-400/50" x-model="filters.WARN"> WARN
+                     <input type="checkbox" class="checkbox checkbox-xs checkbox-warning rounded-[2px] w-3 h-3 border-yellow-400/50" x-model="filters.WARN"> <span x-text="$store.global.t('logLevelWarn')">WARN</span>
                  </label>
                  <label class="flex items-center gap-1.5 cursor-pointer text-red-500 opacity-50 hover:opacity-100 transition-opacity" :class="{'opacity-100': filters.ERROR}">
-                     <input type="checkbox" class="checkbox checkbox-xs checkbox-error rounded-[2px] w-3 h-3 border-red-500/50" x-model="filters.ERROR"> ERR
+                     <input type="checkbox" class="checkbox checkbox-xs checkbox-error rounded-[2px] w-3 h-3 border-red-500/50" x-model="filters.ERROR"> <span x-text="$store.global.t('logLevelError')">ERR</span>
                  </label>
             </div>
         </div>
@@ -61,7 +62,7 @@
     </div>
 
     <!-- Log Content -->
-    <div id="logs-container" class="flex-1 overflow-auto p-4 font-mono text-xs space-y-0.5 bg-[#050505]">
+    <div id="logs-container" class="flex-1 overflow-auto p-4 font-mono text-xs space-y-0.5 bg-space-950">
         <template x-for="(log, idx) in filteredLogs" :key="idx">
             <div class="hover:bg-white/5 rounded px-2 py-0.5 -mx-2 break-words leading-tight flex gap-3 group">
                 <span class="text-gray-600 w-16 shrink-0 select-none group-hover:text-gray-500"
@@ -78,8 +79,10 @@
         </template>
         <!-- Blinking Cursor -->
         <div class="h-4 w-2 bg-gray-500 animate-pulse mt-1 inline-block" x-show="filteredLogs.length === logs.length && !searchQuery"></div>
-        <div x-show="filteredLogs.length === 0 && logs.length > 0" class="text-gray-600 italic mt-4 text-center">
+        <div x-show="filteredLogs.length === 0 && logs.length > 0" class="text-gray-600 italic mt-4 text-center"
+            x-text="$store.global.t('noLogsMatch')">
             No logs match filter
         </div>
+    </div>
     </div>
 </div>

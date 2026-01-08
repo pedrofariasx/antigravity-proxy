@@ -25,8 +25,8 @@ document.addEventListener('alpine:init', () => {
 
             // Chart Defaults
             if (typeof Chart !== 'undefined') {
-                Chart.defaults.color = '#71717a';
-                Chart.defaults.borderColor = '#27272a';
+                Chart.defaults.color = window.utils.getThemeColor('--color-text-dim');
+                Chart.defaults.borderColor = window.utils.getThemeColor('--color-space-border');
                 Chart.defaults.font.family = '"JetBrains Mono", monospace';
             }
 

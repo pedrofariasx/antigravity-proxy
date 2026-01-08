@@ -13,7 +13,8 @@ window.utils = {
         let response = await fetch(url, options);
 
         if (response.status === 401) {
-            const password = prompt('Enter Web UI Password:');
+            const store = Alpine.store('global');
+            const password = prompt(store ? store.t('enterPassword') : 'Enter Web UI Password:');
             if (password) {
                 // Return new password so caller can update state
                 // This implies we need a way to propagate the new password back
@@ -31,11 +32,16 @@ window.utils = {
     },
 
     formatTimeUntil(isoTime) {
+        const store = Alpine.store('global');
         const diff = new Date(isoTime) - new Date();
-        if (diff <= 0) return 'READY';
+        if (diff <= 0) return store ? store.t('ready') : 'READY';
         const mins = Math.floor(diff / 60000);
         const hrs = Math.floor(mins / 60);
         if (hrs > 0) return `${hrs}H ${mins % 60}M`;
         return `${mins}M`;
+    },
+
+    getThemeColor(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     }
 };

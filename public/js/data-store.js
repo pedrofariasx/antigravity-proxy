@@ -59,7 +59,8 @@ document.addEventListener('alpine:init', () => {
             } catch (error) {
                 console.error('Fetch error:', error);
                 this.connectionStatus = 'disconnected';
-                Alpine.store('global').showToast('Connection Lost', 'error');
+                const store = Alpine.store('global');
+                store.showToast(store.t('connectionLost'), 'error');
             } finally {
                 this.loading = false;
             }

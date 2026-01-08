@@ -44,7 +44,8 @@ document.addEventListener('alpine:init', () => {
             localStorage.setItem('antigravity_settings', JSON.stringify(toSave));
 
             if (!silent) {
-                Alpine.store('global').showToast('Configuration Saved', 'success');
+                const store = Alpine.store('global');
+                store.showToast(store.t('configSaved'), 'success');
             }
 
             // Trigger updates

@@ -15,13 +15,86 @@
 import path from 'path';
 import express from 'express';
 import { getPublicConfig, saveConfig, config } from '../config.js';
-import { DEFAULT_PORT } from '../constants.js';
+import { DEFAULT_PORT, ACCOUNT_CONFIG_PATH } from '../constants.js';
 import { readClaudeConfig, updateClaudeConfig, getClaudeConfigPath } from '../utils/claude-config.js';
 import { logger } from '../utils/logger.js';
 import { getAuthorizationUrl, completeOAuthFlow } from '../auth/oauth.js';
+import { loadAccounts, saveAccounts } from '../account-manager/storage.js';
 
 // OAuth state storage (state -> { verifier, timestamp })
 const pendingOAuthStates = new Map();
+
+/**
+ * WebUI Helper Functions - Direct account manipulation
+ * These functions work around AccountManager's limited API by directly
+ * manipulating the accounts.json config file (non-invasive approach for PR)
+ */
+
+/**
+ * Set account enabled/disabled state
+ */
+async function setAccountEnabled(email, enabled) {
+    const { accounts, settings, activeIndex } = await loadAccounts(ACCOUNT_CONFIG_PATH);
+    const account = accounts.find(a => a.email === email);
+    if (!account) {
+        throw new Error(`Account ${email} not found`);
+    }
+    account.enabled = enabled;
+    await saveAccounts(ACCOUNT_CONFIG_PATH, accounts, settings, activeIndex);
+    logger.info(`[WebUI] Account ${email} ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+/**
+ * Remove account from config
+ */
+async function removeAccount(email) {
+    const { accounts, settings, activeIndex } = await loadAccounts(ACCOUNT_CONFIG_PATH);
+    const index = accounts.findIndex(a => a.email === email);
+    if (index === -1) {
+        throw new Error(`Account ${email} not found`);
+    }
+    accounts.splice(index, 1);
+    // Adjust activeIndex if needed
+    const newActiveIndex = activeIndex >= accounts.length ? Math.max(0, accounts.length - 1) : activeIndex;
+    await saveAccounts(ACCOUNT_CONFIG_PATH, accounts, settings, newActiveIndex);
+    logger.info(`[WebUI] Account ${email} removed`);
+}
+
+/**
+ * Add new account to config
+ */
+async function addAccount(accountData) {
+    const { accounts, settings, activeIndex } = await loadAccounts(ACCOUNT_CONFIG_PATH);
+
+    // Check if account already exists
+    const existingIndex = accounts.findIndex(a => a.email === accountData.email);
+    if (existingIndex !== -1) {
+        // Update existing account
+        accounts[existingIndex] = {
+            ...accounts[existingIndex],
+            ...accountData,
+            enabled: true,
+            isInvalid: false,
+            invalidReason: null,
+            addedAt: accounts[existingIndex].addedAt || new Date().toISOString()
+        };
+        logger.info(`[WebUI] Account ${accountData.email} updated`);
+    } else {
+        // Add new account
+        accounts.push({
+            ...accountData,
+            enabled: true,
+            isInvalid: false,
+            invalidReason: null,
+            modelRateLimits: {},
+            lastUsed: null,
+            addedAt: new Date().toISOString()
+        });
+        logger.info(`[WebUI] Account ${accountData.email} added`);
+    }
+
+    await saveAccounts(ACCOUNT_CONFIG_PATH, accounts, settings, activeIndex);
+}
 
 /**
  * Auth Middleware - Optional password protection for WebUI
@@ -114,7 +187,11 @@ export function mountWebUI(app, dirname, accountManager) {
                 return res.status(400).json({ status: 'error', error: 'enabled must be a boolean' });
             }
 
-            accountManager.setAccountEnabled(email, enabled);
+            await setAccountEnabled(email, enabled);
+
+            // Reload AccountManager to pick up changes
+            await accountManager.initialize();
+
             res.json({
                 status: 'ok',
                 message: `Account ${email} ${enabled ? 'enabled' : 'disabled'}`
@@ -130,7 +207,11 @@ export function mountWebUI(app, dirname, accountManager) {
     app.delete('/api/accounts/:email', async (req, res) => {
         try {
             const { email } = req.params;
-            accountManager.removeAccount(email);
+            await removeAccount(email);
+
+            // Reload AccountManager to pick up changes
+            await accountManager.initialize();
+
             res.json({
                 status: 'ok',
                 message: `Account ${email} removed`
@@ -145,7 +226,9 @@ export function mountWebUI(app, dirname, accountManager) {
      */
     app.post('/api/accounts/reload', async (req, res) => {
         try {
-            await accountManager.reloadAccounts();
+            // Reload AccountManager from disk
+            await accountManager.initialize();
+
             const status = accountManager.getStatus();
             res.json({
                 status: 'ok',
@@ -183,7 +266,7 @@ export function mountWebUI(app, dirname, accountManager) {
      */
     app.post('/api/config', (req, res) => {
         try {
-            const { debug, logLevel, maxRetries, retryBaseMs, retryMaxMs, persistTokenCache } = req.body;
+            const { debug, logLevel, maxRetries, retryBaseMs, retryMaxMs, persistTokenCache, defaultCooldownMs, maxWaitBeforeErrorMs } = req.body;
 
             // Only allow updating specific fields (security)
             const updates = {};
@@ -202,6 +285,12 @@ export function mountWebUI(app, dirname, accountManager) {
             }
             if (typeof persistTokenCache === 'boolean') {
                 updates.persistTokenCache = persistTokenCache;
+            }
+            if (typeof defaultCooldownMs === 'number' && defaultCooldownMs >= 1000 && defaultCooldownMs <= 300000) {
+                updates.defaultCooldownMs = defaultCooldownMs;
+            }
+            if (typeof maxWaitBeforeErrorMs === 'number' && maxWaitBeforeErrorMs >= 0 && maxWaitBeforeErrorMs <= 600000) {
+                updates.maxWaitBeforeErrorMs = maxWaitBeforeErrorMs;
             }
 
             if (Object.keys(updates).length === 0) {
@@ -228,6 +317,48 @@ export function mountWebUI(app, dirname, accountManager) {
             }
         } catch (error) {
             logger.error('[WebUI] Error updating config:', error);
+            res.status(500).json({ status: 'error', error: error.message });
+        }
+    });
+
+    /**
+     * POST /api/config/password - Change WebUI password
+     */
+    app.post('/api/config/password', (req, res) => {
+        try {
+            const { oldPassword, newPassword } = req.body;
+
+            // Validate input
+            if (!newPassword || typeof newPassword !== 'string') {
+                return res.status(400).json({
+                    status: 'error',
+                    error: 'New password is required'
+                });
+            }
+
+            // If current password exists, verify old password
+            if (config.webuiPassword && config.webuiPassword !== oldPassword) {
+                return res.status(403).json({
+                    status: 'error',
+                    error: 'Invalid current password'
+                });
+            }
+
+            // Save new password
+            const success = saveConfig({ webuiPassword: newPassword });
+
+            if (success) {
+                // Update in-memory config
+                config.webuiPassword = newPassword;
+                res.json({
+                    status: 'ok',
+                    message: 'Password changed successfully'
+                });
+            } else {
+                throw new Error('Failed to save password to config file');
+            }
+        } catch (error) {
+            logger.error('[WebUI] Error changing password:', error);
             res.status(500).json({ status: 'error', error: error.message });
         }
     });
@@ -427,12 +558,15 @@ export function mountWebUI(app, dirname, accountManager) {
             const accountData = await completeOAuthFlow(code, storedState.verifier);
 
             // Add or update the account
-            accountManager.addAccount({
+            await addAccount({
                 email: accountData.email,
                 refreshToken: accountData.refreshToken,
                 projectId: accountData.projectId,
                 source: 'oauth'
             });
+
+            // Reload AccountManager to pick up the new account
+            await accountManager.initialize();
 
             // Return a simple HTML page that closes itself or redirects
             res.send(`
@@ -440,11 +574,12 @@ export function mountWebUI(app, dirname, accountManager) {
                 <html>
                 <head>
                     <title>Authentication Successful</title>
+                    <link rel="stylesheet" href="/css/style.css">
                     <style>
                         body {
-                            font-family: system-ui, -apple-system, sans-serif;
-                            background: #09090b;
-                            color: #e4e4e7;
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                            background-color: var(--color-space-950);
+                            color: var(--color-text-main);
                             display: flex;
                             justify-content: center;
                             align-items: center;
@@ -452,7 +587,7 @@ export function mountWebUI(app, dirname, accountManager) {
                             margin: 0;
                             flex-direction: column;
                         }
-                        h1 { color: #22c55e; }
+                        h1 { color: var(--color-neon-green); }
                     </style>
                 </head>
                 <body>
@@ -479,14 +614,16 @@ export function mountWebUI(app, dirname, accountManager) {
                 <html>
                 <head>
                     <title>Authentication Failed</title>
+                    <link rel="stylesheet" href="/css/style.css">
                     <style>
                         body {
-                            font-family: system-ui, -apple-system, sans-serif;
-                            background: #09090b;
-                            color: #ef4444;
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                            background-color: var(--color-space-950);
+                            color: var(--color-text-main);
                             text-align: center;
                             padding: 50px;
                         }
+                        h1 { color: var(--color-neon-red); }
                     </style>
                 </head>
                 <body>

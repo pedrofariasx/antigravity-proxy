@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendMessage, sendMessageStream, listModels, getModelQuotas } from './cloudcode/index.js';
 import { mountWebUI } from './webui/index.js';
+import { config } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,7 @@ import { REQUEST_BODY_LIMIT } from './constants.js';
 import { AccountManager } from './account-manager/index.js';
 import { formatDuration } from './utils/helpers.js';
 import { logger } from './utils/logger.js';
+import usageStats from './modules/usage-stats.js';
 
 // Parse fallback flag directly from command line args to avoid circular dependency
 const args = process.argv.slice(2);
@@ -62,6 +64,9 @@ async function ensureInitialized() {
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+
+// Setup usage statistics middleware
+usageStats.setupMiddleware(app);
 
 // Mount WebUI (optional web interface for account management)
 mountWebUI(app, __dirname, accountManager);
@@ -132,11 +137,11 @@ app.get('/health', async (req, res) => {
     try {
         await ensureInitialized();
         const start = Date.now();
-        
+
         // Get high-level status first
         const status = accountManager.getStatus();
         const allAccounts = accountManager.getAllAccounts();
-        
+
         // Fetch quotas for each account in parallel to get detailed model info
         const accountDetails = await Promise.allSettled(
             allAccounts.map(async (account) => {
@@ -423,6 +428,7 @@ app.get('/account-limits', async (req, res) => {
             timestamp: new Date().toLocaleString(),
             totalAccounts: allAccounts.length,
             models: sortedModels,
+            modelConfig: config.modelMapping || {},
             accounts: accountLimits.map(acc => ({
                 email: acc.email,
                 status: acc.status,
@@ -535,23 +541,19 @@ app.post('/v1/messages', async (req, res) => {
         await ensureInitialized();
 
 
-        const {
-            model,
-            messages,
-            max_tokens,
-            stream,
-            system,
-            tools,
-            tool_choice,
-            thinking,
-            top_p,
-            top_k,
-            temperature
-        } = req.body;
+        // Resolve model mapping if configured
+        let requestedModel = model || 'claude-3-5-sonnet-20241022';
+        const modelMapping = config.modelMapping || {};
+        if (modelMapping[requestedModel] && modelMapping[requestedModel].mapping) {
+            const targetModel = modelMapping[requestedModel].mapping;
+            logger.info(`[Server] Mapping model ${requestedModel} -> ${targetModel}`);
+            requestedModel = targetModel;
+        }
+
+        const modelId = requestedModel;
 
         // Optimistic Retry: If ALL accounts are rate-limited for this model, reset them to force a fresh check.
         // If we have some available accounts, we try them first.
-        const modelId = model || 'claude-3-5-sonnet-20241022';
         if (accountManager.isAllRateLimited(modelId)) {
             logger.warn(`[Server] All accounts rate-limited for ${modelId}. Resetting state for optimistic retry.`);
             accountManager.resetAllRateLimits();
@@ -570,7 +572,7 @@ app.post('/v1/messages', async (req, res) => {
 
         // Build the request object
         const request = {
-            model: model || 'claude-3-5-sonnet-20241022',
+            model: modelId,
             messages,
             max_tokens: max_tokens || 4096,
             stream,
@@ -676,6 +678,8 @@ app.post('/v1/messages', async (req, res) => {
 /**
  * Catch-all for unsupported endpoints
  */
+usageStats.setupRoutes(app);
+
 app.use('*', (req, res) => {
     if (logger.isDebugEnabled) {
         logger.debug(`[API] 404 Not Found: ${req.method} ${req.originalUrl}`);

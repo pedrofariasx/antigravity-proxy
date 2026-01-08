@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="black" class="dark">
+<html lang="en" data-theme="antigravity" class="dark">
 
 <head>
     <meta charset="UTF-8">
@@ -26,18 +26,36 @@
                     colors: {
                         // Deep Space Palette
                         space: {
-                            950: '#050505', // Almost black
-                            900: '#0a0a0a',
-                            800: '#171717',
-                            border: '#27272a'
+                            950: 'var(--color-space-950)', // Deep background
+                            900: 'var(--color-space-900)', // Panel background
+                            850: 'var(--color-space-850)', // Hover states
+                            800: 'var(--color-space-800)', // UI elements
+                            border: 'var(--color-space-border)'
                         },
                         neon: {
-                            purple: '#a855f7',
-                            cyan: '#06b6d4',
-                            green: '#22c55e'
+                            purple: 'var(--color-neon-purple)',
+                            cyan: 'var(--color-neon-cyan)',
+                            green: 'var(--color-neon-green)',
+                            yellow: 'var(--color-neon-yellow)',
+                            red: 'var(--color-neon-red)'
                         }
                     }
                 }
+            },
+            daisyui: {
+                themes: [{
+                    antigravity: {
+                        "primary": "var(--color-neon-purple)",   // Neon Purple
+                        "secondary": "var(--color-neon-green)", // Neon Green
+                        "accent": "var(--color-neon-cyan)",    // Neon Cyan
+                        "neutral": "var(--color-space-800)",   // space-800
+                        "base-100": "var(--color-space-950)",  // space-950
+                        "info": "var(--color-neon-cyan)",
+                        "success": "var(--color-neon-green)",
+                        "warning": "var(--color-neon-yellow)",
+                        "error": "var(--color-neon-red)",
+                    }
+                }]
             }
         }
     </script>
@@ -96,8 +114,8 @@
                 class="w-8 h-8 rounded bg-gradient-to-br from-neon-purple to-blue-600 flex items-center justify-center text-white font-bold shadow-[0_0_15px_rgba(168,85,247,0.4)]">
                 AG</div>
             <div class="flex flex-col">
-                <span class="text-sm font-bold tracking-wide text-white">ANTIGRAVITY</span>
-                <span class="text-[10px] text-gray-500 font-mono tracking-wider">CLAUDE PROXY SYSTEM</span>
+                <span class="text-sm font-bold tracking-wide text-white" x-text="$store.global.t('systemName')">ANTIGRAVITY</span>
+                <span class="text-[10px] text-gray-500 font-mono tracking-wider" x-text="$store.global.t('systemDesc')">CLAUDE PROXY SYSTEM</span>
             </div>
         </div>
 
@@ -111,14 +129,14 @@
                     :class="connectionStatus === 'connected' ? 'bg-neon-green shadow-[0_0_8px_rgba(34,197,94,0.6)]' : (connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500')">
                 </div>
                 <span
-                    x-text="connectionStatus === 'connected' ? 'ONLINE' : (connectionStatus === 'disconnected' ? 'OFFLINE' : 'CONNECTING')"></span>
+                    x-text="$store.global.connectionStatus === 'connected' ? $store.global.t('online') : ($store.global.connectionStatus === 'disconnected' ? $store.global.t('offline') : $store.global.t('connecting'))"></span>
             </div>
 
             <div class="h-4 w-px bg-space-border"></div>
 
             <!-- Refresh Button -->
             <button class="btn btn-ghost btn-xs btn-square text-gray-400 hover:text-white hover:bg-white/5"
-                @click="fetchData" :disabled="loading" title="Refresh Data">
+                @click="fetchData" :disabled="loading" :title="$store.global.t('refreshData')">
                 <svg class="w-4 h-4" :class="{'animate-spin': loading}" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -133,7 +151,7 @@
 
         <!-- Sidebar -->
         <div class="w-64 bg-space-900 border-r border-space-border flex flex-col pt-6 pb-4">
-            <div class="px-4 mb-2 text-xs font-bold text-gray-600 uppercase tracking-widest">Main</div>
+            <div class="px-4 mb-2 text-xs font-bold text-gray-600 uppercase tracking-widest" x-text="$store.global.t('main')">Main</div>
             <nav class="flex flex-col gap-1">
                 <button
                     class="nav-item flex items-center gap-3 px-6 py-3 text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5"
@@ -157,7 +175,7 @@
                 </button>
             </nav>
 
-            <div class="px-4 mt-8 mb-2 text-xs font-bold text-gray-600 uppercase tracking-widest">System</div>
+            <div class="px-4 mt-8 mb-2 text-xs font-bold text-gray-600 uppercase tracking-widest" x-text="$store.global.t('system')">System</div>
             <nav class="flex flex-col gap-1">
                 <button
                     class="nav-item flex items-center gap-3 px-6 py-3 text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5"
@@ -193,7 +211,7 @@
         </div>
 
         <!-- Main Content -->
-        <div class="flex-1 overflow-auto bg-space-950 p-6 relative">
+        <div class="flex-1 overflow-auto bg-space-950 relative">
 
             <!-- Views Container -->
             <!-- Dashboard -->
@@ -220,37 +238,33 @@
     <!-- Add Account Modal -->
     <dialog id="add_account_modal" class="modal backdrop-blur-sm">
         <div class="modal-box bg-space-900 border border-space-border text-gray-300 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-            <h3 class="font-bold text-lg text-white" x-text="t('addNode')">Add New Account</h3>
+            <h3 class="font-bold text-lg text-white" x-text="$store.global.t('addNode')">Add New Account</h3>
 
             <div class="py-6 flex flex-col gap-4">
-                <p class="text-sm text-gray-400">Connect a Google Workspace account to increase your API quota limit.
+                <p class="text-sm text-gray-400" x-text="$store.global.t('connectGoogleDesc')">Connect a Google Workspace account to increase your API quota limit.
                     The account will be used to proxy Claude requests via Antigravity.</p>
 
                 <button
-                    class="btn btn-primary bg-white text-black hover:bg-gray-200 border-none flex items-center justify-center gap-3 h-12"
+                    class="btn btn-primary flex items-center justify-center gap-3 h-12"
                     @click="addAccountWeb">
-                    <svg class="w-5 h-5" viewBox="0 0 24 24">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                         <path
-                            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                            fill="#4285F4"></path>
+                            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"></path>
                         <path
-                            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                            fill="#34A853"></path>
+                            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"></path>
                         <path
-                            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                            fill="#FBBC05"></path>
+                            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"></path>
                         <path
-                            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                            fill="#EA4335"></path>
+                            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"></path>
                     </svg>
-                    <span x-text="t('connectGoogle')">Connect Google Account</span>
+                    <span x-text="$store.global.t('connectGoogle')">Connect Google Account</span>
                 </button>
 
-                <div class="divider text-xs text-gray-600">OR</div>
+                <div class="divider text-xs text-gray-600 uppercase" x-text="$store.global.t('or')">OR</div>
 
                 <div class="collapse collapse-arrow bg-space-800 border border-space-border/50">
                     <input type="checkbox" />
-                    <div class="collapse-title text-sm font-medium text-gray-400">
+                    <div class="collapse-title text-sm font-medium text-gray-400" x-text="$store.global.t('useCliCommand')">
                         Use CLI Command
                     </div>
                     <div class="collapse-content">
@@ -263,12 +277,12 @@
 
             <div class="modal-action">
                 <form method="dialog">
-                    <button class="btn btn-ghost hover:bg-white/10">Close</button>
+                    <button class="btn btn-ghost hover:bg-white/10" x-text="$store.global.t('close')">Close</button>
                 </form>
             </div>
         </div>
         <form method="dialog" class="modal-backdrop">
-            <button>close</button>
+            <button x-text="$store.global.t('close')">close</button>
         </form>
     </dialog>
 

@@ -6,99 +6,105 @@ window.Components = window.Components || {};
 
 window.Components.accountManager = () => ({
     async refreshAccount(email) {
-        Alpine.store('global').showToast(`Refreshing ${email}...`, 'info');
-        const password = Alpine.store('global').webuiPassword;
+        const store = Alpine.store('global');
+        store.showToast(store.t('refreshingAccount', { email }), 'info');
+        const password = store.webuiPassword;
         try {
             const { response, newPassword } = await window.utils.request(`/api/accounts/${encodeURIComponent(email)}/refresh`, { method: 'POST' }, password);
-            if (newPassword) Alpine.store('global').webuiPassword = newPassword;
+            if (newPassword) store.webuiPassword = newPassword;
 
             const data = await response.json();
             if (data.status === 'ok') {
-                Alpine.store('global').showToast(`Refreshed ${email}`, 'success');
+                store.showToast(store.t('refreshedAccount', { email }), 'success');
                 Alpine.store('data').fetchData();
             } else {
-                Alpine.store('global').showToast(data.error || 'Refresh failed', 'error');
+                store.showToast(data.error || store.t('refreshFailed'), 'error');
             }
         } catch (e) {
-            Alpine.store('global').showToast('Refresh failed: ' + e.message, 'error');
+            store.showToast(store.t('refreshFailed') + ': ' + e.message, 'error');
         }
     },
 
     async toggleAccount(email, enabled) {
-        const password = Alpine.store('global').webuiPassword;
+        const store = Alpine.store('global');
+        const password = store.webuiPassword;
         try {
             const { response, newPassword } = await window.utils.request(`/api/accounts/${encodeURIComponent(email)}/toggle`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled })
             }, password);
-            if (newPassword) Alpine.store('global').webuiPassword = newPassword;
+            if (newPassword) store.webuiPassword = newPassword;
 
             const data = await response.json();
             if (data.status === 'ok') {
-                Alpine.store('global').showToast(`Account ${email} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+                const status = enabled ? store.t('enabledStatus') : store.t('disabledStatus');
+                store.showToast(store.t('accountToggled', { email, status }), 'success');
                 Alpine.store('data').fetchData();
             } else {
-                Alpine.store('global').showToast(data.error || 'Toggle failed', 'error');
+                store.showToast(data.error || store.t('toggleFailed'), 'error');
             }
         } catch (e) {
-            Alpine.store('global').showToast('Toggle failed: ' + e.message, 'error');
+            store.showToast(store.t('toggleFailed') + ': ' + e.message, 'error');
         }
     },
 
     async fixAccount(email) {
-        Alpine.store('global').showToast(`Re-authenticating ${email}...`, 'info');
-        const password = Alpine.store('global').webuiPassword;
+        const store = Alpine.store('global');
+        store.showToast(store.t('reauthenticating', { email }), 'info');
+        const password = store.webuiPassword;
         try {
             const urlPath = `/api/auth/url?email=${encodeURIComponent(email)}`;
             const { response, newPassword } = await window.utils.request(urlPath, {}, password);
-            if (newPassword) Alpine.store('global').webuiPassword = newPassword;
+            if (newPassword) store.webuiPassword = newPassword;
 
             const data = await response.json();
             if (data.status === 'ok') {
                 window.open(data.url, 'google_oauth', 'width=600,height=700,scrollbars=yes');
             } else {
-                Alpine.store('global').showToast(data.error || 'Failed to get auth URL', 'error');
+                store.showToast(data.error || store.t('authUrlFailed'), 'error');
             }
         } catch (e) {
-            Alpine.store('global').showToast('Failed: ' + e.message, 'error');
+            store.showToast(store.t('authUrlFailed') + ': ' + e.message, 'error');
         }
     },
 
     async deleteAccount(email) {
-        if (!confirm(Alpine.store('global').t('confirmDelete'))) return;
-        const password = Alpine.store('global').webuiPassword;
+        const store = Alpine.store('global');
+        if (!confirm(store.t('confirmDelete'))) return;
+        const password = store.webuiPassword;
         try {
             const { response, newPassword } = await window.utils.request(`/api/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' }, password);
-            if (newPassword) Alpine.store('global').webuiPassword = newPassword;
+            if (newPassword) store.webuiPassword = newPassword;
 
             const data = await response.json();
             if (data.status === 'ok') {
-                Alpine.store('global').showToast(`Deleted ${email}`, 'success');
+                store.showToast(store.t('deletedAccount', { email }), 'success');
                 Alpine.store('data').fetchData();
             } else {
-                Alpine.store('global').showToast(data.error || 'Delete failed', 'error');
+                store.showToast(data.error || store.t('deleteFailed'), 'error');
             }
         } catch (e) {
-            Alpine.store('global').showToast('Delete failed: ' + e.message, 'error');
+            store.showToast(store.t('deleteFailed') + ': ' + e.message, 'error');
         }
     },
 
     async reloadAccounts() {
-        const password = Alpine.store('global').webuiPassword;
+        const store = Alpine.store('global');
+        const password = store.webuiPassword;
         try {
             const { response, newPassword } = await window.utils.request('/api/accounts/reload', { method: 'POST' }, password);
-            if (newPassword) Alpine.store('global').webuiPassword = newPassword;
+            if (newPassword) store.webuiPassword = newPassword;
 
             const data = await response.json();
             if (data.status === 'ok') {
-                Alpine.store('global').showToast('Accounts reloaded', 'success');
+                store.showToast(store.t('accountsReloaded'), 'success');
                 Alpine.store('data').fetchData();
             } else {
-                Alpine.store('global').showToast(data.error || 'Reload failed', 'error');
+                store.showToast(data.error || store.t('reloadFailed'), 'error');
             }
         } catch (e) {
-            Alpine.store('global').showToast('Reload failed: ' + e.message, 'error');
+            store.showToast(store.t('reloadFailed') + ': ' + e.message, 'error');
         }
     }
 });

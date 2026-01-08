@@ -39,6 +39,9 @@ export function getAvailableAccounts(accounts, modelId = null) {
     return accounts.filter(acc => {
         if (acc.isInvalid) return false;
 
+        // WebUI: Skip disabled accounts
+        if (acc.enabled === false) return false;
+
         if (modelId && acc.modelRateLimits && acc.modelRateLimits[modelId]) {
             const limit = acc.modelRateLimits[modelId];
             if (limit.isRateLimited && limit.resetTime > Date.now()) {
