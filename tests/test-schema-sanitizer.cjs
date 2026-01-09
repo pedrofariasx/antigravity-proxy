@@ -16,7 +16,7 @@ async function runTests() {
     console.log('╚══════════════════════════════════════════════════════════════╝\n');
 
     // Dynamic import for ESM module
-    const { sanitizeSchema, cleanSchemaForGemini } = await import('../src/format/schema-sanitizer.js');
+    const { sanitizeSchema, cleanSchema } = await import('../src/format/schema-sanitizer.js');
 
     let passed = 0;
     let failed = 0;
@@ -48,7 +48,7 @@ async function runTests() {
     // Test 1: Basic type conversion to uppercase
     test('Basic type conversion to uppercase', () => {
         const schema = { type: 'string', description: 'A test string' };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         assertEqual(result.type, 'STRING', 'Type should be uppercase STRING');
     });
 
@@ -61,7 +61,7 @@ async function runTests() {
                 age: { type: 'integer' }
             }
         };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         assertEqual(result.type, 'OBJECT', 'Object type should be uppercase');
         assertEqual(result.properties.name.type, 'STRING', 'Nested string type should be uppercase');
         assertEqual(result.properties.age.type, 'INTEGER', 'Nested integer type should be uppercase');
@@ -75,7 +75,7 @@ async function runTests() {
                 type: 'string'
             }
         };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         assertEqual(result.type, 'ARRAY', 'Array type should be uppercase ARRAY');
         assertEqual(result.items.type, 'STRING', 'Items type should be uppercase STRING');
     });
@@ -98,7 +98,7 @@ async function runTests() {
                 }
             }
         };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         
         assertEqual(result.type, 'OBJECT', 'Root type should be OBJECT');
         assertEqual(result.properties.todos.type, 'ARRAY', 'Todos type should be ARRAY');
@@ -134,7 +134,7 @@ async function runTests() {
                 count: { type: 'number' }
             }
         };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         
         assertEqual(result.type, 'OBJECT');
         assertEqual(result.properties.tasks.type, 'ARRAY');
@@ -145,9 +145,9 @@ async function runTests() {
         assertEqual(result.properties.count.type, 'NUMBER');
     });
 
-    // Test 6: cleanSchemaForGemini handles anyOf (when not stripped by sanitizeSchema)
-    test('cleanSchemaForGemini handles anyOf and converts types', () => {
-        // Test cleanSchemaForGemini directly with anyOf (bypassing sanitizeSchema)
+    // Test 6: cleanSchema handles anyOf (when not stripped by sanitizeSchema)
+    test('cleanSchema handles anyOf and converts types', () => {
+        // Test cleanSchema directly with anyOf (bypassing sanitizeSchema)
         const schema = {
             type: 'object',
             properties: {
@@ -159,7 +159,7 @@ async function runTests() {
                 }
             }
         };
-        const result = cleanSchemaForGemini(schema);
+        const result = cleanSchema(schema);
         
         assertEqual(result.type, 'OBJECT');
         // anyOf gets flattened to best option (object type scores highest)
@@ -176,7 +176,7 @@ async function runTests() {
                 }
             }
         };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         
         assertEqual(result.type, 'OBJECT');
         assertEqual(result.properties.optional.type, 'STRING');
@@ -195,7 +195,7 @@ async function runTests() {
                 obj: { type: 'object', properties: { x: { type: 'string' } } }
             }
         };
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         
         assertEqual(result.properties.str.type, 'STRING');
         assertEqual(result.properties.num.type, 'NUMBER');
@@ -207,7 +207,7 @@ async function runTests() {
 
     // Test 9: Empty schema gets placeholder with correct types
     test('Empty schema gets placeholder with uppercase types', () => {
-        const result = cleanSchemaForGemini(sanitizeSchema(null));
+        const result = cleanSchema(sanitizeSchema(null));
         
         assertEqual(result.type, 'OBJECT');
         assertEqual(result.properties.reason.type, 'STRING');
@@ -242,7 +242,7 @@ async function runTests() {
             required: ['operation']
         };
         
-        const result = cleanSchemaForGemini(sanitizeSchema(schema));
+        const result = cleanSchema(sanitizeSchema(schema));
         
         // Verify all types are uppercase
         assertEqual(result.type, 'OBJECT');
